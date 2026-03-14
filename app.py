@@ -32,7 +32,7 @@ def get_http_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(
         {
-            "User-Agent": "Mozilla/5.0 FuturesPnLTracker/1.4",
+            "User-Agent": "Mozilla/5.0 FuturesPnLTracker/1.5",
             "Accept": "application/json",
         }
     )
@@ -54,11 +54,11 @@ def inject_css() -> None:
         """
         <style>
             .main > div {
-                padding-top: 1rem;
+                padding-top: 0.9rem;
             }
             .block-container {
-                padding-top: 1rem;
-                padding-bottom: 1.6rem;
+                padding-top: 0.9rem;
+                padding-bottom: 1.4rem;
             }
             .app-card {
                 background: #ffffff;
@@ -84,7 +84,7 @@ def inject_css() -> None:
                 border-radius: 14px;
                 padding: 0.9rem;
                 box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
-                min-height: 100px;
+                min-height: 96px;
             }
             .metric-box-profit {
                 background: rgba(34, 197, 94, 0.10);
@@ -136,8 +136,16 @@ def inject_css() -> None:
                 border: 1px solid #e5e7eb;
                 border-radius: 14px;
                 padding: 0.8rem;
-                margin-bottom: 0.7rem;
+                margin-bottom: 0.65rem;
                 box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+            }
+            .trade-card-profit {
+                background: rgba(34, 197, 94, 0.08);
+                border: 1px solid rgba(34, 197, 94, 0.28);
+            }
+            .trade-card-loss {
+                background: rgba(239, 68, 68, 0.08);
+                border: 1px solid rgba(239, 68, 68, 0.28);
             }
             .source-badge {
                 display: inline-block;
@@ -148,13 +156,6 @@ def inject_css() -> None:
                 font-weight: 700;
                 background: rgba(99, 102, 241, 0.12);
                 color: #4338ca;
-            }
-            .trade-mini-head {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 0.75rem;
-                margin-bottom: 0.4rem;
             }
             .trade-symbol {
                 font-weight: 800;
@@ -205,13 +206,6 @@ def inject_css() -> None:
             .history-loss {
                 color: #b91c1c;
                 font-weight: 800;
-            }
-            .action-btn {
-                display: inline-block;
-                padding: 4px 10px;
-                border-radius: 8px;
-                font-weight: 800;
-                font-size: 14px;
             }
             div[data-testid="stMetric"] {
                 background: transparent;
@@ -545,22 +539,18 @@ def render_trade_card(trade: dict, prices: Dict[str, float], allow_close: bool) 
     current_price = prices.get(symbol) if status == "OPEN" else None
     pnl_value = 0.0 if current_price is None else pnl_for_trade(side, quantity, entry_price, current_price)
 
-    bg_class = ""
+    card_class = "trade-card"
     if status == "OPEN":
-        bg_class = " metric-box-profit" if pnl_value >= 0 else " metric-box-loss"
+        card_class += " trade-card-profit" if pnl_value >= 0 else " trade-card-loss"
 
-    st.markdown(f"<div class='trade-card{bg_class}'>", unsafe_allow_html=True)
+    st.markdown(f"<div class='{card_class}'>", unsafe_allow_html=True)
 
     head_left, head_right = st.columns([5, 1])
     with head_left:
         st.markdown(
-            f"<div class='trade-mini-head'>"
-            f"<div>"
             f"<span class='trade-pill {'long-pill' if side == 'LONG' else 'short-pill'}'>{side}</span>"
             f"<span class='trade-pill {'open-pill' if status == 'OPEN' else 'closed-pill'}'>{status}</span>"
-            f"<span class='trade-symbol'>{symbol}</span>"
-            f"</div>"
-            f"</div>",
+            f"<span class='trade-symbol'>{symbol}</span>",
             unsafe_allow_html=True,
         )
     with head_right:
@@ -568,7 +558,7 @@ def render_trade_card(trade: dict, prices: Dict[str, float], allow_close: bool) 
             st.session_state[delete_key] = True
             st.rerun()
 
-    cols = st.columns([1, 1, 1, 1, 1, 1])
+    cols = st.columns([1, 1, 1, 1, 1])
     cols[0].markdown(f"**Qty**  \n{format_money(quantity)}")
     cols[1].markdown(f"**Entry**  \n{format_money(entry_price)}")
 
@@ -580,32 +570,28 @@ def render_trade_card(trade: dict, prices: Dict[str, float], allow_close: bool) 
             unsafe_allow_html=True,
         )
         cols[4].markdown(f"**Opened**  \n{trade['created_at']}")
-        cols[5].markdown("")
-
-        action1, action2 = st.columns([2.2, 2.8])
 
         if allow_close:
-            with action1:
-                with st.expander(f"Close #{trade_id}"):
-                    st.caption(f"Live market price: {current_display}")
+            with st.expander(f"Close #{trade_id}"):
+                st.caption(f"Live market price: {current_display}")
 
-                    with st.form(f"close_form_{trade_id}"):
-                        close_price = st.number_input(
-                            "Close Price",
-                            min_value=0.00000001,
-                            value=float(st.session_state[close_key]),
-                            format="%.8f",
-                            key=f"close_price_{trade_id}",
-                        )
-                        submitted = st.form_submit_button("Confirm Close", use_container_width=True)
+                with st.form(f"close_form_{trade_id}"):
+                    close_price = st.number_input(
+                        "Close Price",
+                        min_value=0.00000001,
+                        value=float(st.session_state[close_key]),
+                        format="%.8f",
+                        key=f"close_price_{trade_id}",
+                    )
+                    submitted = st.form_submit_button("Confirm Close", use_container_width=True)
 
-                    st.session_state[close_key] = close_price
+                st.session_state[close_key] = close_price
 
-                    if submitted:
-                        close_trade(trade_id, float(close_price))
-                        st.success(f"Trade #{trade_id} closed.")
-                        st.session_state.pop(close_key, None)
-                        st.rerun()
+                if submitted:
+                    close_trade(trade_id, float(close_price))
+                    st.success(f"Trade #{trade_id} closed.")
+                    st.session_state.pop(close_key, None)
+                    st.rerun()
     else:
         close_price = float(trade["close_price"] or 0)
         realized_pnl = float(trade["realized_pnl"] or 0)
@@ -615,7 +601,6 @@ def render_trade_card(trade: dict, prices: Dict[str, float], allow_close: bool) 
             unsafe_allow_html=True,
         )
         cols[4].markdown(f"**Closed**  \n{trade['closed_at'] or '-'}")
-        cols[5].markdown("")
 
     if st.session_state.get(delete_key):
         st.warning(f"Delete trade #{trade_id} permanently?")
@@ -636,12 +621,12 @@ def render_trade_card(trade: dict, prices: Dict[str, float], allow_close: bool) 
 
 
 def render_history_table(trades: List[dict], prices: Dict[str, float]) -> None:
-    rows_html = []
-
     sorted_trades = sorted(
         trades,
         key=lambda t: (0 if t["status"] == "OPEN" else 1, -int(t["id"]))
     )
+
+    rows = []
 
     for trade in sorted_trades:
         symbol = trade["symbol"]
@@ -651,24 +636,30 @@ def render_history_table(trades: List[dict], prices: Dict[str, float]) -> None:
         entry_price = float(trade["entry_price"])
         live_price = prices.get(symbol)
 
-        live_pnl = ""
+        live_price_display = ""
+        live_pnl_display = ""
         live_pnl_class = ""
+
         if status == "OPEN" and live_price is not None:
             pnl_val = pnl_for_trade(side, quantity, entry_price, float(live_price))
-            live_pnl = format_money(pnl_val)
+            live_price_display = format_money(float(live_price))
+            live_pnl_display = format_money(pnl_val)
             live_pnl_class = "history-profit" if pnl_val >= 0 else "history-loss"
 
-        final_pnl = trade["realized_pnl"]
+        close_price_display = ""
+        if trade["close_price"] is not None:
+            close_price_display = format_money(float(trade["close_price"]))
+
         final_pnl_display = ""
         final_pnl_class = ""
-        if final_pnl is not None:
-            final_pnl = float(final_pnl)
-            final_pnl_display = format_money(final_pnl)
-            final_pnl_class = "history-profit" if final_pnl >= 0 else "history-loss"
+        if trade["realized_pnl"] is not None:
+            final_pnl_val = float(trade["realized_pnl"])
+            final_pnl_display = format_money(final_pnl_val)
+            final_pnl_class = "history-profit" if final_pnl_val >= 0 else "history-loss"
 
         row_class = "history-row-closed" if status == "CLOSED" else "history-row-open"
 
-        rows_html.append(
+        rows.append(
             f"""
             <tr class="{row_class}">
                 <td>{trade['id']}</td>
@@ -677,9 +668,9 @@ def render_history_table(trades: List[dict], prices: Dict[str, float]) -> None:
                 <td>{side}</td>
                 <td>{format_money(quantity)}</td>
                 <td>{format_money(entry_price)}</td>
-                <td>{format_money(float(live_price)) if live_price is not None else ''}</td>
-                <td class="{live_pnl_class}">{live_pnl}</td>
-                <td>{format_money(float(trade['close_price'])) if trade['close_price'] is not None else ''}</td>
+                <td>{live_price_display}</td>
+                <td class="{live_pnl_class}">{live_pnl_display}</td>
+                <td>{close_price_display}</td>
                 <td class="{final_pnl_class}">{final_pnl_display}</td>
                 <td>{trade['created_at'] or ''}</td>
                 <td>{trade['closed_at'] or ''}</td>
@@ -707,11 +698,12 @@ def render_history_table(trades: List[dict], prices: Dict[str, float]) -> None:
                 </tr>
             </thead>
             <tbody>
-                {''.join(rows_html)}
+                {''.join(rows)}
             </tbody>
         </table>
     </div>
     """
+
     st.markdown(table_html, unsafe_allow_html=True)
 
 
@@ -836,6 +828,7 @@ def history_page(prices: Dict[str, float], data_source: str, source_message: str
 
     with delete_col:
         st.markdown("### Delete Trade")
+
         trade_labels = [
             f"#{t['id']} | {t['symbol']} | {t['side']} | {t['status']}"
             for t in filtered_trades
