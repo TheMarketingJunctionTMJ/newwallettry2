@@ -32,7 +32,7 @@ def get_http_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(
         {
-            "User-Agent": "Mozilla/5.0 FuturesPnLTracker/1.2",
+            "User-Agent": "Mozilla/5.0 FuturesPnLTracker/1.3",
             "Accept": "application/json",
         }
     )
@@ -146,17 +146,6 @@ def inject_css() -> None:
     )
 
 
-def okx_to_binance_symbol(inst_id: str) -> str:
-    return inst_id.replace("-", "")
-
-
-def binance_to_okx_symbol(symbol: str) -> str:
-    if symbol.endswith("USDT"):
-        base = symbol[:-4]
-        return f"{base}-USDT-SWAP"
-    return symbol
-
-
 @st.cache_data(ttl=2, show_spinner=False)
 def fetch_binance_ticker_prices() -> Dict[str, float]:
     session = get_http_session()
@@ -189,7 +178,7 @@ def fetch_okx_symbols() -> List[str]:
     for item in payload.get("data", []):
         inst_id = item.get("instId", "")
         if inst_id.endswith("-USDT-SWAP") and item.get("state") == "live":
-            symbols.append(okx_to_binance_symbol(inst_id))
+            symbols.append(inst_id.replace("-", ""))
 
     return sorted(symbols)
 
@@ -207,7 +196,7 @@ def fetch_okx_ticker_prices() -> Dict[str, float]:
         if not inst_id.endswith("-USDT-SWAP"):
             continue
 
-        symbol = okx_to_binance_symbol(inst_id)
+        symbol = inst_id.replace("-", "")
         raw_price = item.get("last") or item.get("markPx")
         try:
             prices[symbol] = float(raw_price)
@@ -325,9 +314,18 @@ def render_trade_form(symbols: List[str], prices: Dict[str, float], data_source:
     st.subheader("Add New Trade")
     st.caption(f"Available symbols loaded from {data_source}.")
 
+    if "trade_search" not in st.session_state:
+        st.session_state["trade_search"] = ""
+    if "selected_symbol" not in st.session_state:
+        st.session_state["selected_symbol"] = "BTCUSDT" if "BTCUSDT" in symbols else symbols[0]
+    if "manual_entry_price" not in st.session_state:
+        initial_symbol = st.session_state["selected_symbol"]
+        st.session_state["manual_entry_price"] = float(prices.get(initial_symbol, 100.0))
+
     search_text = st.text_input(
         "Search Futures Symbol",
         placeholder="Type BTC, ETH, SOL, XRP...",
+        key="trade_search",
     ).strip().upper()
 
     filtered_symbols = [s for s in symbols if search_text in s] if search_text else symbols
@@ -335,16 +333,20 @@ def render_trade_form(symbols: List[str], prices: Dict[str, float], data_source:
         st.warning("No matching symbol found. Showing full symbol list.")
         filtered_symbols = symbols
 
-    default_symbol = "BTCUSDT" if "BTCUSDT" in filtered_symbols else filtered_symbols[0]
-    default_price = float(prices.get(default_symbol, 100.0))
+    if st.session_state["selected_symbol"] not in filtered_symbols:
+        st.session_state["selected_symbol"] = filtered_symbols[0]
 
-    default_index = filtered_symbols.index(default_symbol) if default_symbol in filtered_symbols else 0
+    current_market_price = float(prices.get(st.session_state["selected_symbol"], 0.0))
 
-    with st.form("new_trade_form", clear_on_submit=True):
-        c1, c2, c3, c4 = st.columns([2.3, 1.1, 1.15, 1.4])
+    with st.form("new_trade_form", clear_on_submit=False):
+        c1, c2, c3, c4, c5 = st.columns([2.0, 1.0, 1.0, 1.1, 1.1])
 
         with c1:
-            symbol = st.selectbox("Symbol", options=filtered_symbols, index=default_index)
+            symbol = st.selectbox(
+                "Symbol",
+                options=filtered_symbols,
+                index=filtered_symbols.index(st.session_state["selected_symbol"]),
+            )
 
         with c2:
             side = st.selectbox("Side", options=["LONG", "SHORT"], index=0)
@@ -358,14 +360,22 @@ def render_trade_form(symbols: List[str], prices: Dict[str, float], data_source:
             )
 
         with c4:
+            st.markdown("**Live Price**")
+            st.write(format_money(float(prices.get(symbol, 0.0))))
+
+        with c5:
             entry_price = st.number_input(
                 "Entry Price",
                 min_value=0.00000001,
-                value=default_price,
+                value=float(st.session_state["manual_entry_price"]),
                 format="%.8f",
+                key="entry_price_input",
             )
 
         submitted = st.form_submit_button("Add Trade", use_container_width=True)
+
+    st.session_state["selected_symbol"] = symbol
+    st.session_state["manual_entry_price"] = entry_price
 
     if submitted:
         add_trade(
@@ -375,6 +385,7 @@ def render_trade_form(symbols: List[str], prices: Dict[str, float], data_source:
             entry_price=float(entry_price),
         )
         st.success(f"{side} trade added for {symbol}.")
+        st.session_state["manual_entry_price"] = float(prices.get(symbol, entry_price))
         st.rerun()
 
     st.markdown("</div>", unsafe_allow_html=True)
@@ -437,6 +448,11 @@ def render_trade_card(trade: dict, prices: Dict[str, float], allow_close: bool) 
     entry_price = float(trade["entry_price"])
     status = trade["status"]
 
+    close_key = f"close_manual_{trade['id']}"
+    if close_key not in st.session_state:
+        current_price = prices.get(symbol)
+        st.session_state[close_key] = float(current_price if current_price is not None else entry_price)
+
     st.markdown("<div class='trade-card'>", unsafe_allow_html=True)
 
     pill_side_class = "long-pill" if side == "LONG" else "short-pill"
@@ -472,21 +488,24 @@ def render_trade_card(trade: dict, prices: Dict[str, float], allow_close: bool) 
 
         if allow_close:
             with st.expander(f"Close trade #{trade['id']}"):
-                suggested_close = float(current_price if current_price is not None else entry_price)
+                st.caption(f"Live market price: {current_display}")
 
                 with st.form(f"close_form_{trade['id']}"):
                     close_price = st.number_input(
                         "Close Price",
                         min_value=0.00000001,
-                        value=suggested_close,
+                        value=float(st.session_state[close_key]),
                         format="%.8f",
                         key=f"close_price_{trade['id']}",
                     )
                     submitted = st.form_submit_button("Confirm Close", use_container_width=True)
 
+                st.session_state[close_key] = close_price
+
                 if submitted:
                     close_trade(int(trade["id"]), float(close_price))
                     st.success(f"Trade #{trade['id']} closed.")
+                    st.session_state.pop(close_key, None)
                     st.rerun()
 
     else:
@@ -536,7 +555,7 @@ def history_page(prices: Dict[str, float], data_source: str, source_message: str
     with head1:
         st.markdown("<div class='big-title'>Trade History</div>", unsafe_allow_html=True)
         st.markdown(
-            "<div class='muted'>Open trades stay at the top. Closed trades stay below them.</div>",
+            "<div class='muted'>Compact table view for all trades.</div>",
             unsafe_allow_html=True,
         )
         st.markdown(f"<div class='source-badge'>Source: {data_source}</div>", unsafe_allow_html=True)
@@ -553,42 +572,46 @@ def history_page(prices: Dict[str, float], data_source: str, source_message: str
         st.info("No trades found.")
         return
 
-    open_trades = [t for t in trades if t["status"] == "OPEN"]
-    closed_trades = [t for t in trades if t["status"] == "CLOSED"]
-
-    st.markdown("### Open Trades")
-    if open_trades:
-        for trade in open_trades:
-            render_trade_card(trade, prices, allow_close=True)
-    else:
-        st.info("No open trades.")
-
-    st.markdown("### Closed Trades")
-    if closed_trades:
-        for trade in closed_trades:
-            render_trade_card(trade, prices, allow_close=False)
-    else:
-        st.info("No closed trades yet.")
-
-    export_rows = []
+    table_rows = []
     for trade in trades:
-        export_rows.append(
+        symbol = trade["symbol"]
+        status = trade["status"]
+        entry_price = float(trade["entry_price"])
+        quantity = float(trade["quantity"])
+        live_price = prices.get(symbol)
+
+        unrealized = None
+        if status == "OPEN" and live_price is not None:
+            unrealized = pnl_for_trade(trade["side"], quantity, entry_price, float(live_price))
+
+        table_rows.append(
             {
                 "ID": trade["id"],
+                "Status": trade["status"],
                 "Symbol": trade["symbol"],
                 "Side": trade["side"],
-                "Quantity": trade["quantity"],
-                "Entry Price": trade["entry_price"],
-                "Status": trade["status"],
+                "Qty": quantity,
+                "Entry Price": entry_price,
+                "Live Price": live_price,
+                "Live PnL": unrealized,
                 "Close Price": trade["close_price"],
                 "Final PnL": trade["realized_pnl"],
                 "Created At": trade["created_at"],
                 "Closed At": trade["closed_at"],
-                "Market Data Source": data_source,
             }
         )
 
-    df = pd.DataFrame(export_rows)
+    df = pd.DataFrame(table_rows)
+    status_order = {"OPEN": 0, "CLOSED": 1}
+    df["_sort"] = df["Status"].map(status_order)
+    df = df.sort_values(by=["_sort", "ID"], ascending=[True, False]).drop(columns=["_sort"])
+
+    st.dataframe(
+        df,
+        use_container_width=True,
+        height=520,
+        hide_index=True,
+    )
 
     st.download_button(
         "Download Trades CSV",
