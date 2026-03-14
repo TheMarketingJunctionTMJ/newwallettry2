@@ -16,10 +16,9 @@ st.set_page_config(
 
 init_db()
 
-BINANCE_FUTURES_EXCHANGE_INFO = "https://fapi.binance.com/fapi/v1/exchangeInfo"
-BINANCE_FUTURES_MARK_PRICES = "https://fapi.binance.com/fapi/v1/premiumIndex"
-BYBIT_LINEAR_INSTRUMENTS = "https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000"
-BYBIT_LINEAR_TICKERS = "https://api.bybit.com/v5/market/tickers?category=linear"
+BINANCE_FUTURES_TICKER_PRICE = "https://fapi.binance.com/fapi/v1/ticker/price"
+OKX_SWAP_INSTRUMENTS = "https://www.okx.com/api/v5/public/instruments?instType=SWAP"
+OKX_SWAP_TICKERS = "https://www.okx.com/api/v5/market/tickers?instType=SWAP"
 
 LOGIN_USERNAME = st.secrets.get("APP_USERNAME", os.getenv("APP_USERNAME", "rahim"))
 LOGIN_PASSWORD = st.secrets.get("APP_PASSWORD", os.getenv("APP_PASSWORD", "rahim123"))
@@ -33,7 +32,7 @@ def get_http_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(
         {
-            "User-Agent": "Mozilla/5.0 FuturesPnLTracker/1.1",
+            "User-Agent": "Mozilla/5.0 FuturesPnLTracker/1.2",
             "Accept": "application/json",
         }
     )
@@ -147,38 +146,32 @@ def inject_css() -> None:
     )
 
 
-@st.cache_data(ttl=21600, show_spinner=False)
-def fetch_binance_symbols() -> List[str]:
-    session = get_http_session()
-    response = session.get(BINANCE_FUTURES_EXCHANGE_INFO, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
-    payload = response.json()
+def okx_to_binance_symbol(inst_id: str) -> str:
+    return inst_id.replace("-", "")
 
-    symbols: List[str] = []
-    for item in payload.get("symbols", []):
-        if (
-            item.get("contractType") == "PERPETUAL"
-            and item.get("status") == "TRADING"
-            and item.get("symbol", "").endswith("USDT")
-        ):
-            symbols.append(item["symbol"])
 
-    return sorted(symbols)
+def binance_to_okx_symbol(symbol: str) -> str:
+    if symbol.endswith("USDT"):
+        base = symbol[:-4]
+        return f"{base}-USDT-SWAP"
+    return symbol
 
 
 @st.cache_data(ttl=2, show_spinner=False)
-def fetch_binance_mark_prices() -> Dict[str, float]:
+def fetch_binance_ticker_prices() -> Dict[str, float]:
     session = get_http_session()
-    response = session.get(BINANCE_FUTURES_MARK_PRICES, timeout=REQUEST_TIMEOUT)
+    response = session.get(BINANCE_FUTURES_TICKER_PRICE, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     payload = response.json()
 
     prices: Dict[str, float] = {}
     if isinstance(payload, list):
         for item in payload:
-            symbol = item.get("symbol")
+            symbol = item.get("symbol", "")
+            if not symbol.endswith("USDT"):
+                continue
             try:
-                prices[symbol] = float(item.get("markPrice", 0))
+                prices[symbol] = float(item.get("price", 0))
             except (TypeError, ValueError):
                 continue
 
@@ -186,32 +179,36 @@ def fetch_binance_mark_prices() -> Dict[str, float]:
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
-def fetch_bybit_symbols() -> List[str]:
+def fetch_okx_symbols() -> List[str]:
     session = get_http_session()
-    response = session.get(BYBIT_LINEAR_INSTRUMENTS, timeout=REQUEST_TIMEOUT)
+    response = session.get(OKX_SWAP_INSTRUMENTS, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     payload = response.json()
 
     symbols: List[str] = []
-    for item in payload.get("result", {}).get("list", []):
-        symbol = item.get("symbol", "")
-        if symbol.endswith("USDT") and item.get("status") == "Trading":
-            symbols.append(symbol)
+    for item in payload.get("data", []):
+        inst_id = item.get("instId", "")
+        if inst_id.endswith("-USDT-SWAP") and item.get("state") == "live":
+            symbols.append(okx_to_binance_symbol(inst_id))
 
     return sorted(symbols)
 
 
 @st.cache_data(ttl=2, show_spinner=False)
-def fetch_bybit_mark_prices() -> Dict[str, float]:
+def fetch_okx_ticker_prices() -> Dict[str, float]:
     session = get_http_session()
-    response = session.get(BYBIT_LINEAR_TICKERS, timeout=REQUEST_TIMEOUT)
+    response = session.get(OKX_SWAP_TICKERS, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     payload = response.json()
 
     prices: Dict[str, float] = {}
-    for item in payload.get("result", {}).get("list", []):
-        symbol = item.get("symbol")
-        raw_price = item.get("markPrice") or item.get("lastPrice")
+    for item in payload.get("data", []):
+        inst_id = item.get("instId", "")
+        if not inst_id.endswith("-USDT-SWAP"):
+            continue
+
+        symbol = okx_to_binance_symbol(inst_id)
+        raw_price = item.get("last") or item.get("markPx")
         try:
             prices[symbol] = float(raw_price)
         except (TypeError, ValueError):
@@ -223,29 +220,34 @@ def fetch_bybit_mark_prices() -> Dict[str, float]:
 @st.cache_data(ttl=2, show_spinner=False)
 def load_market_data() -> Tuple[List[str], Dict[str, float], str, str]:
     try:
-        symbols = fetch_binance_symbols()
-        prices = fetch_binance_mark_prices()
+        prices = fetch_binance_ticker_prices()
+        symbols = sorted(prices.keys())
         if symbols:
-            return symbols, prices, "Binance Futures", "Live mark prices from Binance Futures."
-        raise requests.RequestException("No Binance Futures symbols were returned.")
+            return (
+                symbols,
+                prices,
+                "Binance Futures",
+                "Live futures prices from Binance ticker endpoint.",
+            )
+        raise requests.RequestException("No Binance futures prices were returned.")
     except requests.RequestException as binance_error:
         try:
-            symbols = fetch_bybit_symbols()
-            prices = fetch_bybit_mark_prices()
+            symbols = fetch_okx_symbols()
+            prices = fetch_okx_ticker_prices()
             if symbols:
                 return (
                     symbols,
                     prices,
-                    "Bybit Perpetual Fallback",
-                    f"Binance was unavailable ({binance_error}). Using Bybit linear perpetual prices instead.",
+                    "OKX Swap Fallback",
+                    f"Binance was unavailable ({binance_error}). Using OKX perpetual swap prices instead.",
                 )
-            raise requests.RequestException("No Bybit perpetual symbols were returned.")
-        except requests.RequestException as bybit_error:
+            raise requests.RequestException("No OKX swap symbols were returned.")
+        except requests.RequestException as okx_error:
             return (
                 DEFAULT_SYMBOLS,
                 {},
                 "Offline Fallback",
-                f"Binance failed: {binance_error}. Bybit also failed: {bybit_error}",
+                f"Binance failed: {binance_error}. OKX also failed: {okx_error}",
             )
 
 
@@ -301,7 +303,7 @@ def top_bar(data_source: str, source_message: str) -> None:
     with col1:
         st.markdown("<div class='big-title'>Futures Portfolio Tracker</div>", unsafe_allow_html=True)
         st.markdown(
-            "<div class='muted'>Live perpetual mark-price based PnL with automatic market-data fallback.</div>",
+            "<div class='muted'>Live perpetual-price based PnL with automatic market-data fallback.</div>",
             unsafe_allow_html=True,
         )
         st.markdown(f"<div class='source-badge'>Source: {data_source}</div>", unsafe_allow_html=True)
@@ -333,14 +335,16 @@ def render_trade_form(symbols: List[str], prices: Dict[str, float], data_source:
         st.warning("No matching symbol found. Showing full symbol list.")
         filtered_symbols = symbols
 
-    default_symbol = filtered_symbols[0]
+    default_symbol = "BTCUSDT" if "BTCUSDT" in filtered_symbols else filtered_symbols[0]
     default_price = float(prices.get(default_symbol, 100.0))
+
+    default_index = filtered_symbols.index(default_symbol) if default_symbol in filtered_symbols else 0
 
     with st.form("new_trade_form", clear_on_submit=True):
         c1, c2, c3, c4 = st.columns([2.3, 1.1, 1.15, 1.4])
 
         with c1:
-            symbol = st.selectbox("Symbol", options=filtered_symbols, index=0)
+            symbol = st.selectbox("Symbol", options=filtered_symbols, index=default_index)
 
         with c2:
             side = st.selectbox("Side", options=["LONG", "SHORT"], index=0)
