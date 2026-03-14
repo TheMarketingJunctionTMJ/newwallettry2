@@ -32,11 +32,21 @@ def get_http_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(
         {
-            "User-Agent": "Mozilla/5.0 FuturesPnLTracker/1.3",
+            "User-Agent": "Mozilla/5.0 FuturesPnLTracker/1.4",
             "Accept": "application/json",
         }
     )
     return session
+
+
+def delete_trade_record(trade_id: int) -> None:
+    import sqlite3
+
+    conn = sqlite3.connect("trades.db")
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM trades WHERE id = ?", (trade_id,))
+    conn.commit()
+    conn.close()
 
 
 def inject_css() -> None:
@@ -44,46 +54,54 @@ def inject_css() -> None:
         """
         <style>
             .main > div {
-                padding-top: 1.2rem;
+                padding-top: 1rem;
             }
             .block-container {
-                padding-top: 1.2rem;
-                padding-bottom: 2rem;
+                padding-top: 1rem;
+                padding-bottom: 1.6rem;
             }
             .app-card {
                 background: #ffffff;
                 border: 1px solid #e5e7eb;
-                border-radius: 18px;
-                padding: 1.15rem 1.15rem 1rem 1.15rem;
-                box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
-                margin-bottom: 1rem;
+                border-radius: 16px;
+                padding: 1rem 1rem 0.9rem 1rem;
+                box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+                margin-bottom: 0.85rem;
             }
             .big-title {
-                font-size: 2rem;
+                font-size: 1.9rem;
                 font-weight: 800;
-                margin-bottom: 0.25rem;
+                margin-bottom: 0.2rem;
                 color: #0f172a;
             }
             .muted {
                 color: #6b7280;
-                font-size: 0.97rem;
+                font-size: 0.96rem;
             }
             .metric-box {
                 background: #ffffff;
                 border: 1px solid #e5e7eb;
-                border-radius: 16px;
-                padding: 1rem;
-                box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
-                min-height: 108px;
+                border-radius: 14px;
+                padding: 0.9rem;
+                box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+                min-height: 100px;
+            }
+            .metric-box-profit {
+                background: rgba(34, 197, 94, 0.10);
+                border: 1px solid rgba(34, 197, 94, 0.35);
+            }
+            .metric-box-loss {
+                background: rgba(239, 68, 68, 0.10);
+                border: 1px solid rgba(239, 68, 68, 0.35);
             }
             .trade-pill {
                 display: inline-block;
-                padding: 0.25rem 0.65rem;
+                padding: 0.22rem 0.58rem;
                 border-radius: 999px;
-                font-size: 0.8rem;
+                font-size: 0.76rem;
                 font-weight: 700;
-                margin-right: 0.45rem;
-                margin-bottom: 0.5rem;
+                margin-right: 0.35rem;
+                margin-bottom: 0.35rem;
             }
             .long-pill {
                 background: rgba(34, 197, 94, 0.12);
@@ -111,30 +129,94 @@ def inject_css() -> None:
             }
             .small-label {
                 color: #6b7280;
-                font-size: 0.84rem;
+                font-size: 0.82rem;
             }
             .trade-card {
                 background: #ffffff;
                 border: 1px solid #e5e7eb;
-                border-radius: 18px;
-                padding: 1rem;
-                margin-bottom: 0.9rem;
-                box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+                border-radius: 14px;
+                padding: 0.8rem;
+                margin-bottom: 0.7rem;
+                box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
             }
             .source-badge {
                 display: inline-block;
-                margin-top: 0.4rem;
+                margin-top: 0.35rem;
                 padding: 0.25rem 0.65rem;
                 border-radius: 999px;
-                font-size: 0.82rem;
+                font-size: 0.8rem;
                 font-weight: 700;
                 background: rgba(99, 102, 241, 0.12);
                 color: #4338ca;
             }
-            div[data-testid="stMetric"] {
+            .trade-mini-head {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 0.75rem;
+                margin-bottom: 0.4rem;
+            }
+            .trade-symbol {
+                font-weight: 800;
+                font-size: 1rem;
+                color: #0f172a;
+            }
+            .history-table-wrap {
+                overflow-x: auto;
                 background: #ffffff;
-                border-radius: 12px;
-                padding: 0.1rem 0.1rem 0.1rem 0;
+                border: 1px solid #e5e7eb;
+                border-radius: 16px;
+                padding: 0.3rem;
+                margin-top: 0.75rem;
+                margin-bottom: 1rem;
+            }
+            .history-table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 16px;
+            }
+            .history-table th {
+                background: #f3f4f6;
+                font-weight: 800;
+                text-align: center;
+                padding: 12px 10px;
+                border: 1px solid #d1d5db;
+                white-space: nowrap;
+                font-size: 16px;
+            }
+            .history-table td {
+                text-align: center;
+                font-weight: 700;
+                padding: 10px 8px;
+                border: 1px solid #e5e7eb;
+                white-space: nowrap;
+                font-size: 15px;
+            }
+            .history-row-open {
+                background: #ffffff;
+            }
+            .history-row-closed {
+                background: #fff7cc !important;
+            }
+            .history-profit {
+                color: #15803d;
+                font-weight: 800;
+            }
+            .history-loss {
+                color: #b91c1c;
+                font-weight: 800;
+            }
+            .action-btn {
+                display: inline-block;
+                padding: 4px 10px;
+                border-radius: 8px;
+                font-weight: 800;
+                font-size: 14px;
+            }
+            div[data-testid="stMetric"] {
+                background: transparent;
+                border-radius: 10px;
+                padding: 0;
             }
             div[data-testid="stForm"] {
                 border: none !important;
@@ -259,7 +341,7 @@ def pnl_class(value: float) -> str:
 
 
 def show_login() -> None:
-    left, center, right = st.columns([1, 1.1, 1])
+    _, center, _ = st.columns([1, 1.1, 1])
 
     with center:
         st.markdown("<div class='app-card'>", unsafe_allow_html=True)
@@ -335,8 +417,6 @@ def render_trade_form(symbols: List[str], prices: Dict[str, float], data_source:
 
     if st.session_state["selected_symbol"] not in filtered_symbols:
         st.session_state["selected_symbol"] = filtered_symbols[0]
-
-    current_market_price = float(prices.get(st.session_state["selected_symbol"], 0.0))
 
     with st.form("new_trade_form", clear_on_submit=False):
         c1, c2, c3, c4, c5 = st.columns([2.0, 1.0, 1.0, 1.1, 1.1])
@@ -424,12 +504,16 @@ def summarize_open_trades(trades: List[dict], prices: Dict[str, float]) -> None:
 
     for col, (label, value) in zip(cols, metric_values):
         with col:
-            st.markdown("<div class='metric-box'>", unsafe_allow_html=True)
-            st.markdown(f"<div class='small-label'>{label}</div>", unsafe_allow_html=True)
+            extra_class = ""
+            if label == "Unrealized PnL":
+                extra_class = " metric-box-profit" if total_unrealized >= 0 else " metric-box-loss"
+
+            st.markdown(f"<div class='metric-box{extra_class}'>", unsafe_allow_html=True)
+            st.markdown(f"<div class='small-label'><b>{label}</b></div>", unsafe_allow_html=True)
 
             if label == "Unrealized PnL":
                 st.markdown(
-                    f"<div class='{pnl_class(total_unrealized)}' style='font-size:1.6rem; margin-top:0.45rem;'>{value}</div>",
+                    f"<div class='{pnl_class(total_unrealized)}' style='font-size:1.6rem; margin-top:0.45rem; font-weight:800;'>{value}</div>",
                     unsafe_allow_html=True,
                 )
             else:
@@ -447,84 +531,188 @@ def render_trade_card(trade: dict, prices: Dict[str, float], allow_close: bool) 
     quantity = float(trade["quantity"])
     entry_price = float(trade["entry_price"])
     status = trade["status"]
+    trade_id = int(trade["id"])
 
-    close_key = f"close_manual_{trade['id']}"
+    close_key = f"close_manual_{trade_id}"
+    delete_key = f"delete_confirm_{trade_id}"
+
     if close_key not in st.session_state:
         current_price = prices.get(symbol)
         st.session_state[close_key] = float(current_price if current_price is not None else entry_price)
+    if delete_key not in st.session_state:
+        st.session_state[delete_key] = False
 
-    st.markdown("<div class='trade-card'>", unsafe_allow_html=True)
+    current_price = prices.get(symbol) if status == "OPEN" else None
+    pnl_value = 0.0 if current_price is None else pnl_for_trade(side, quantity, entry_price, current_price)
 
-    pill_side_class = "long-pill" if side == "LONG" else "short-pill"
-    pill_status_class = "open-pill" if status == "OPEN" else "closed-pill"
+    bg_class = ""
+    if status == "OPEN":
+        bg_class = " metric-box-profit" if pnl_value >= 0 else " metric-box-loss"
 
-    st.markdown(
-        f"<span class='trade-pill {pill_side_class}'>{side}</span>"
-        f"<span class='trade-pill {pill_status_class}'>{status}</span>"
-        f"<span style='font-weight:800; font-size:1.1rem;'>{symbol}</span>",
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"<div class='trade-card{bg_class}'>", unsafe_allow_html=True)
 
-    cols = st.columns([1.1, 1.1, 1.1, 1.2, 1.4])
-    cols[0].metric("Quantity", format_money(quantity))
-    cols[1].metric("Entry Price", format_money(entry_price))
+    head_left, head_right = st.columns([5, 1])
+    with head_left:
+        st.markdown(
+            f"<div class='trade-mini-head'>"
+            f"<div>"
+            f"<span class='trade-pill {'long-pill' if side == 'LONG' else 'short-pill'}'>{side}</span>"
+            f"<span class='trade-pill {'open-pill' if status == 'OPEN' else 'closed-pill'}'>{status}</span>"
+            f"<span class='trade-symbol'>{symbol}</span>"
+            f"</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    with head_right:
+        if st.button("✖", key=f"delete_btn_{trade_id}", help="Delete this trade", use_container_width=True):
+            st.session_state[delete_key] = True
+            st.rerun()
+
+    cols = st.columns([1, 1, 1, 1, 1, 1])
+    cols[0].markdown(f"**Qty**  \n{format_money(quantity)}")
+    cols[1].markdown(f"**Entry**  \n{format_money(entry_price)}")
 
     if status == "OPEN":
-        current_price = prices.get(symbol)
         current_display = "N/A" if current_price is None else format_money(current_price)
-        pnl_value = 0.0 if current_price is None else pnl_for_trade(side, quantity, entry_price, current_price)
-
-        cols[2].metric("Current Price", current_display)
+        cols[2].markdown(f"**Live**  \n{current_display}")
         cols[3].markdown(
-            f"<div class='small-label'>Live PnL</div>"
-            f"<div class='{pnl_class(pnl_value)}' style='font-size:1.45rem; margin-top:0.35rem;'>{format_money(pnl_value)}</div>",
+            f"**PnL**  \n<span class='{pnl_class(pnl_value)}'>{format_money(pnl_value)}</span>",
             unsafe_allow_html=True,
         )
-        cols[4].markdown(
-            f"<div class='small-label'>Opened</div>"
-            f"<div style='font-weight:600; margin-top:0.35rem;'>{trade['created_at']}</div>",
-            unsafe_allow_html=True,
-        )
+        cols[4].markdown(f"**Opened**  \n{trade['created_at']}")
+        cols[5].markdown("")
+
+        action1, action2 = st.columns([2.2, 2.8])
 
         if allow_close:
-            with st.expander(f"Close trade #{trade['id']}"):
-                st.caption(f"Live market price: {current_display}")
+            with action1:
+                with st.expander(f"Close #{trade_id}"):
+                    st.caption(f"Live market price: {current_display}")
 
-                with st.form(f"close_form_{trade['id']}"):
-                    close_price = st.number_input(
-                        "Close Price",
-                        min_value=0.00000001,
-                        value=float(st.session_state[close_key]),
-                        format="%.8f",
-                        key=f"close_price_{trade['id']}",
-                    )
-                    submitted = st.form_submit_button("Confirm Close", use_container_width=True)
+                    with st.form(f"close_form_{trade_id}"):
+                        close_price = st.number_input(
+                            "Close Price",
+                            min_value=0.00000001,
+                            value=float(st.session_state[close_key]),
+                            format="%.8f",
+                            key=f"close_price_{trade_id}",
+                        )
+                        submitted = st.form_submit_button("Confirm Close", use_container_width=True)
 
-                st.session_state[close_key] = close_price
+                    st.session_state[close_key] = close_price
 
-                if submitted:
-                    close_trade(int(trade["id"]), float(close_price))
-                    st.success(f"Trade #{trade['id']} closed.")
-                    st.session_state.pop(close_key, None)
-                    st.rerun()
-
+                    if submitted:
+                        close_trade(trade_id, float(close_price))
+                        st.success(f"Trade #{trade_id} closed.")
+                        st.session_state.pop(close_key, None)
+                        st.rerun()
     else:
         close_price = float(trade["close_price"] or 0)
         realized_pnl = float(trade["realized_pnl"] or 0)
-
-        cols[2].metric("Close Price", format_money(close_price))
+        cols[2].markdown(f"**Close**  \n{format_money(close_price)}")
         cols[3].markdown(
-            f"<div class='small-label'>Final PnL</div>"
-            f"<div class='{pnl_class(realized_pnl)}' style='font-size:1.45rem; margin-top:0.35rem;'>{format_money(realized_pnl)}</div>",
+            f"**Final PnL**  \n<span class='{pnl_class(realized_pnl)}'>{format_money(realized_pnl)}</span>",
             unsafe_allow_html=True,
         )
-        cols[4].markdown(
-            f"<div class='small-label'>Closed</div>"
-            f"<div style='font-weight:600; margin-top:0.35rem;'>{trade['closed_at'] or '-'}</div>",
-            unsafe_allow_html=True,
-        )
+        cols[4].markdown(f"**Closed**  \n{trade['closed_at'] or '-'}")
+        cols[5].markdown("")
+
+    if st.session_state.get(delete_key):
+        st.warning(f"Delete trade #{trade_id} permanently?")
+        d1, d2 = st.columns(2)
+        with d1:
+            if st.button("Yes, Delete", key=f"confirm_delete_{trade_id}", use_container_width=True):
+                delete_trade_record(trade_id)
+                st.session_state.pop(delete_key, None)
+                st.session_state.pop(close_key, None)
+                st.success(f"Trade #{trade_id} deleted.")
+                st.rerun()
+        with d2:
+            if st.button("Cancel", key=f"cancel_delete_{trade_id}", use_container_width=True):
+                st.session_state[delete_key] = False
+                st.rerun()
 
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_history_table(trades: List[dict], prices: Dict[str, float]) -> None:
+    rows_html = []
+
+    sorted_trades = sorted(
+        trades,
+        key=lambda t: (0 if t["status"] == "OPEN" else 1, -int(t["id"]))
+    )
+
+    for trade in sorted_trades:
+        symbol = trade["symbol"]
+        status = trade["status"]
+        side = trade["side"]
+        quantity = float(trade["quantity"])
+        entry_price = float(trade["entry_price"])
+        live_price = prices.get(symbol)
+
+        live_pnl = ""
+        live_pnl_class = ""
+        if status == "OPEN" and live_price is not None:
+            pnl_val = pnl_for_trade(side, quantity, entry_price, float(live_price))
+            live_pnl = format_money(pnl_val)
+            live_pnl_class = "history-profit" if pnl_val >= 0 else "history-loss"
+
+        final_pnl = trade["realized_pnl"]
+        final_pnl_display = ""
+        final_pnl_class = ""
+        if final_pnl is not None:
+            final_pnl = float(final_pnl)
+            final_pnl_display = format_money(final_pnl)
+            final_pnl_class = "history-profit" if final_pnl >= 0 else "history-loss"
+
+        row_class = "history-row-closed" if status == "CLOSED" else "history-row-open"
+
+        rows_html.append(
+            f"""
+            <tr class="{row_class}">
+                <td>{trade['id']}</td>
+                <td>{status}</td>
+                <td>{symbol}</td>
+                <td>{side}</td>
+                <td>{format_money(quantity)}</td>
+                <td>{format_money(entry_price)}</td>
+                <td>{format_money(float(live_price)) if live_price is not None else ''}</td>
+                <td class="{live_pnl_class}">{live_pnl}</td>
+                <td>{format_money(float(trade['close_price'])) if trade['close_price'] is not None else ''}</td>
+                <td class="{final_pnl_class}">{final_pnl_display}</td>
+                <td>{trade['created_at'] or ''}</td>
+                <td>{trade['closed_at'] or ''}</td>
+            </tr>
+            """
+        )
+
+    table_html = f"""
+    <div class="history-table-wrap">
+        <table class="history-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Status</th>
+                    <th>Symbol</th>
+                    <th>Side</th>
+                    <th>Qty</th>
+                    <th>Entry Price</th>
+                    <th>Live Price</th>
+                    <th>Live PnL</th>
+                    <th>Close Price</th>
+                    <th>Final PnL</th>
+                    <th>Created At</th>
+                    <th>Closed At</th>
+                </tr>
+            </thead>
+            <tbody>
+                {''.join(rows_html)}
+            </tbody>
+        </table>
+    </div>
+    """
+    st.markdown(table_html, unsafe_allow_html=True)
 
 
 def dashboard_page(symbols: List[str], prices: Dict[str, float], data_source: str, source_message: str) -> None:
@@ -534,13 +722,20 @@ def dashboard_page(symbols: List[str], prices: Dict[str, float], data_source: st
     render_trade_form(symbols, prices, data_source)
 
     trades = get_all_trades()
+    open_trades = [t for t in trades if t["status"] == "OPEN"]
+
     summarize_open_trades(trades, prices)
 
     st.markdown("### Ongoing Trades")
-    open_trades = [t for t in trades if t["status"] == "OPEN"]
+
+    filter_options = ["ALL"] + sorted({t["symbol"] for t in trades})
+    selected_filter = st.selectbox("Filter by coin", options=filter_options, key="dashboard_trade_filter")
+
+    if selected_filter != "ALL":
+        open_trades = [t for t in open_trades if t["symbol"] == selected_filter]
 
     if not open_trades:
-        st.info("No open trades yet.")
+        st.info("No open trades found for this filter.")
         return
 
     for trade in open_trades:
@@ -555,7 +750,7 @@ def history_page(prices: Dict[str, float], data_source: str, source_message: str
     with head1:
         st.markdown("<div class='big-title'>Trade History</div>", unsafe_allow_html=True)
         st.markdown(
-            "<div class='muted'>Compact table view for all trades.</div>",
+            "<div class='muted'>Compact table view with close-trade and delete controls.</div>",
             unsafe_allow_html=True,
         )
         st.markdown(f"<div class='source-badge'>Source: {data_source}</div>", unsafe_allow_html=True)
@@ -572,28 +767,130 @@ def history_page(prices: Dict[str, float], data_source: str, source_message: str
         st.info("No trades found.")
         return
 
-    table_rows = []
-    for trade in trades:
+    filter_options = ["ALL"] + sorted({t["symbol"] for t in trades})
+    selected_filter = st.selectbox("Filter history by coin", options=filter_options, key="history_trade_filter")
+
+    filtered_trades = trades
+    if selected_filter != "ALL":
+        filtered_trades = [t for t in trades if t["symbol"] == selected_filter]
+
+    if not filtered_trades:
+        st.info("No trades found for this filter.")
+        return
+
+    render_history_table(filtered_trades, prices)
+
+    open_trades = [t for t in filtered_trades if t["status"] == "OPEN"]
+
+    close_col, delete_col = st.columns(2)
+
+    with close_col:
+        st.markdown("### Close Trade From History")
+
+        if open_trades:
+            open_labels = [
+                f"#{t['id']} | {t['symbol']} | {t['side']} | Qty {format_money(float(t['quantity']))}"
+                for t in open_trades
+            ]
+            trade_map = {label: trade for label, trade in zip(open_labels, open_trades)}
+
+            selected_label = st.selectbox(
+                "Select open trade to close",
+                options=open_labels,
+                key="history_close_trade_select",
+            )
+            selected_trade = trade_map[selected_label]
+
+            close_key = f"history_close_manual_{selected_trade['id']}"
+            if close_key not in st.session_state:
+                current_price = prices.get(selected_trade["symbol"])
+                st.session_state[close_key] = float(
+                    current_price if current_price is not None else float(selected_trade["entry_price"])
+                )
+
+            current_live = prices.get(selected_trade["symbol"])
+            st.caption(
+                f"Live market price for {selected_trade['symbol']}: "
+                f"{format_money(float(current_live)) if current_live is not None else 'N/A'}"
+            )
+
+            with st.form("history_close_form"):
+                close_price = st.number_input(
+                    "Manual Close Price",
+                    min_value=0.00000001,
+                    value=float(st.session_state[close_key]),
+                    format="%.8f",
+                    key="history_close_price_input",
+                )
+                submitted = st.form_submit_button("Close Selected Trade", use_container_width=True)
+
+            st.session_state[close_key] = close_price
+
+            if submitted:
+                close_trade(int(selected_trade["id"]), float(close_price))
+                st.success(f"Trade #{selected_trade['id']} closed.")
+                st.session_state.pop(close_key, None)
+                st.rerun()
+        else:
+            st.info("There are no open trades to close in this filter.")
+
+    with delete_col:
+        st.markdown("### Delete Trade")
+        trade_labels = [
+            f"#{t['id']} | {t['symbol']} | {t['side']} | {t['status']}"
+            for t in filtered_trades
+        ]
+        trade_map = {label: trade for label, trade in zip(trade_labels, filtered_trades)}
+
+        selected_delete_label = st.selectbox(
+            "Select trade to delete",
+            options=trade_labels,
+            key="history_delete_trade_select",
+        )
+        delete_trade_obj = trade_map[selected_delete_label]
+
+        confirm_delete = st.checkbox(
+            f"Confirm delete trade #{delete_trade_obj['id']}",
+            key="history_delete_confirm_checkbox",
+        )
+
+        if st.button("Delete Selected Trade", use_container_width=True, key="history_delete_btn"):
+            if confirm_delete:
+                delete_trade_record(int(delete_trade_obj["id"]))
+                st.success(f"Trade #{delete_trade_obj['id']} deleted.")
+                st.rerun()
+            else:
+                st.error("Please confirm deletion first.")
+
+    export_rows = []
+    sorted_trades = sorted(
+        filtered_trades,
+        key=lambda t: (0 if t["status"] == "OPEN" else 1, -int(t["id"]))
+    )
+
+    for trade in sorted_trades:
         symbol = trade["symbol"]
-        status = trade["status"]
-        entry_price = float(trade["entry_price"])
-        quantity = float(trade["quantity"])
         live_price = prices.get(symbol)
+        live_pnl = None
 
-        unrealized = None
-        if status == "OPEN" and live_price is not None:
-            unrealized = pnl_for_trade(trade["side"], quantity, entry_price, float(live_price))
+        if trade["status"] == "OPEN" and live_price is not None:
+            live_pnl = pnl_for_trade(
+                trade["side"],
+                float(trade["quantity"]),
+                float(trade["entry_price"]),
+                float(live_price),
+            )
 
-        table_rows.append(
+        export_rows.append(
             {
                 "ID": trade["id"],
                 "Status": trade["status"],
                 "Symbol": trade["symbol"],
                 "Side": trade["side"],
-                "Qty": quantity,
-                "Entry Price": entry_price,
+                "Qty": trade["quantity"],
+                "Entry Price": trade["entry_price"],
                 "Live Price": live_price,
-                "Live PnL": unrealized,
+                "Live PnL": live_pnl,
                 "Close Price": trade["close_price"],
                 "Final PnL": trade["realized_pnl"],
                 "Created At": trade["created_at"],
@@ -601,17 +898,7 @@ def history_page(prices: Dict[str, float], data_source: str, source_message: str
             }
         )
 
-    df = pd.DataFrame(table_rows)
-    status_order = {"OPEN": 0, "CLOSED": 1}
-    df["_sort"] = df["Status"].map(status_order)
-    df = df.sort_values(by=["_sort", "ID"], ascending=[True, False]).drop(columns=["_sort"])
-
-    st.dataframe(
-        df,
-        use_container_width=True,
-        height=520,
-        hide_index=True,
-    )
+    df = pd.DataFrame(export_rows)
 
     st.download_button(
         "Download Trades CSV",
